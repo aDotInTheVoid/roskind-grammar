@@ -1,0 +1,1634 @@
+Copyright (C) 1989.1990, James  A.   Roskind,  All  rights  reserved. 
+Abstracting  with credit is permitted.  The contents of this file may 
+be reproduced electronically, or in printed  form,  IN  ITS  ENTIRETY 
+with  no  changes, providing that this copyright notice is intact and 
+applicable in the copy.  No other copying is  permitted  without  the 
+expressed written consent of the author.
+
+FILENAME: GRAMMAR4.TXT
+AUTHOR: Jim Roskind
+        Independent Consultant
+        516 Latania Palm Drive
+        Indialantic FL 32903
+        (407)729-4348
+        jar@ileaf.com
+        or ...!uunet!leafusa!jar
+
+
+    A YACC-able C++ 2.0 GRAMMAR, AND THE RESULTING AMBIGUITIES
+                                        (Release 1.1 Updated 6/90)
+
+ABSTRACT
+
+This  paper describes ambiguous aspects of the C++ language that have 
+been exposed by the construction of a YACC-able grammar for C++.  The 
+grammar  is  provided  in  a  separate  file, but there are extensive 
+references to the actual grammar.  In light of the fact that not  all 
+readers  will have access to a YACC capable of processing my grammar, 
+I have also included (in an appendix) a significant excerpt from  the 
+verbose output of running YACC on my grammar.
+
+This  release  of  the grammars is provided to add some final touches 
+identified by the many users that picked up my  original  posting  in 
+3/90.   As with my first posting, nested types have been omitted from 
+this release of the grammar.   The  decision  to  incorporate  nested 
+types into the C++ language was only clarified with AT&T's release of 
+version 2.1 of C++.  Since the addition of nested  types  appears  to 
+notably  complicate  the  interaction required between the parser and 
+the lexer, it seemed appropriate to release an update to the  grammar 
+that  tries  to  correct  all  known  deficiencies  found in my first 
+release.  A future release should incorporate all enhancements needed 
+for nested types.
+
+Theoretical  Note  (skip if you hate theory): My C++ grammar does not 
+make use of the %prec or %assoc features of YACC, and hence conflicts 
+are  never hidden within my grammar.  The wondrous result is that, to 
+the extent to which my grammar can be seen to span the syntax of  the 
+language,  in all places where YACC reports no conflicts, the grammar 
+is a totally unambiguous statement of the  syntax  of  the  language.  
+This  result  is  remarkable (I think), because the "general case" of 
+deciding whether a grammar is ambiguous or not, is equivalent to (the 
+unsolvable) halting problem.
+
+Although  this  paper  is  terse,  and  perhaps  poorly  (or at least 
+hastily) formed, I believe that its content is so significant  to  my 
+results  that  it  had to be included.  I am sorry that I do not have 
+the time at this point to better arrange its contents.
+
+
+CONTENTS
+        
+        INTRODUCTION
+        REVIEW: STANDARD LEXICAL ANALYSIS HACK: TYPEDEFname VS IDENTIFIER
+        STATUS OF MY "DISAMBIGUATED" GRAMMAR
+        18 EASY CONFLICTS, WITH HAPPY ENDINGS
+        2 REDUCTION CONFLICTS WITH STRAIGHT FORWARD DISAMBIGUATION
+        3 NOVEL CONFLICT THAT YIELD TO SEMANTIC DISAMBIGUATION
+        THE TOUGH AMBIGUITIES: FUNCTION LIKE CASTS AND COMPANY
+        SAMPLE RESOLUTIONS OF AMBIGUITIES BY MY C++ GRAMMAR
+        DIFFICULT AMBIGUITIES FOR C++ 2.0 PARSER TO TRY
+        COMMENTARY ON CURRENT C++ DISAMBIGUATING RULES
+        SOURCE OF CONFLICTS IN C++ (MIXING TYPES AND EXPRESSIONS)
+        FUNCTION LIKE CAST vs DECLARATION : THE TOUGH EXAMPLE
+        CONCLUSION
+
+        APPENDIX A:
+            PROPOSED GRAMMAR MODIFICATIONS (fixing '*', '&' and ':'
+                                        conflicts)
+        APPENDIX B:
+            AMBIGUITIES IN MY C++ GRAMMAR AS LISTED BY YACC VERBOSE OPTION
+
+
+        APPENDIX C:
+            ADVANCED TUTORIAL ON YACC CONFLICTS
+
+INTRODUCTION
+
+This paper is intended  to  go  into  significant  detail  about  the 
+ambiguities  that I have seen in the C++ 2.0 language, and exposed by 
+attempting to develop a YACC compatible (i.e., LALR(1))  grammar.   I 
+must point out that this is NOT meant as an attack on the language or 
+the originators thereof, but rather an  R&D  effort  to  disambiguate 
+some  details.  (I  personally  believe that Stroustrup et.  al.  are 
+doing a GREAT job).  I have the vague hope that the extensive hacking 
+that  I  have done with YACC on the C++ grammar has given me a rather 
+novel vantage point. (I have  expressed  my  observations  to  Bjarne 
+Stroustrup,  and  in  doing  so  verified  that  other  folks had not 
+previously  identified  several  of  my  points).   In  light  of  my 
+activities,  this  paper  includes a fair amount of philosophizing. I 
+hope that none of this paper assumes too greatly that I have  insight 
+that  is  beyond  that  of  the readers, and certainly no insults are 
+intended.
+
+If you like investigating grammars directly (rather than reading what 
+I  have to say), I would strongly suggest you read the ANSI C grammar 
+before looking at the C++ grammar.  The C++ grammar is pretty  large, 
+and  you can expect the following stats if you have a similar YACC to 
+that I am using:
+
+Berkeley YACC (1.4 2/25/90):
+
+25 shift/reduce conflicts, 7 reduce/reduce conflicts.
+103 terminals, 161 nonterminals
+609 grammar rules, 1157 states
+
+
+AT&T YACC (with large table sizes):
+
+123/127 terminals, 160/200 nonterminals
+609/650 grammar rules, 1157/1200 states
+25 shift/reduce, 7 reduce/reduce conflicts reported
+243/350 working sets used
+memory: states,etc. 13727/60000, parser 10871/12000
+495/600 distinct lookahead sets
+756 extra closures
+7300 shift entries, 25 exceptions
+1797 goto entries
+4731 entries saved by goto default
+Optimizer space used: input 18036/60000, output 8092/12000
+8092 table entries, 3568 zero
+maximum spread: 351, maximum offset: 1148
+
+
+
+REVIEW: STANDARD LEXICAL ANALYSIS HACK: TYPEDEFname VS IDENTIFIER
+
+This section is targeted  at  readers  that  are  not  familiar  with 
+parsing  C  with a context free grammar.  The reader should note that 
+there are two distinct forms of `identifiers' gathered during lexical 
+analysis,  and  identified as terminal tokens in both of my grammars.  
+The  terminal  tokens   are   called   IDENTIFIER   and   TYPEDEFname 
+respectively. This distinction is a required by a fundamental element 
+of the C language.  The definition of a  "TYPEDEFname"  is  a  lexeme 
+that  looks  like  a standard identifier, but is currently defined in 
+the symbol table as being declared a typedef (or class, struct,  enum 
+tag)  name. All other lexemes that appear as identifiers (and are not 
+keywords) are  tokenized  as  IDENTIFIERs.   The  remainder  of  this 
+section will review the motivation for this approach.
+
+Consider the following sample code, which uses the C language:
+
+        ...
+        int main() { f (*a) [4] ; ...
+
+Most  reader  will intuitively parse the above sequence as a function 
+call to "f", with an argument "*a", the  return  value  of  which  is 
+(probably)  a  pointer,  and  hence  can  be indexed by "4".  Such an 
+interpretation presumes that the prior context was something like:
+
+        ...
+        extern float *a;
+        char * f(float);
+        int main() { f (*a) [4] ; ...
+
+However, if the prior context was **INSTEAD**:
+
+        ...
+        typedef int f;
+        extern float a;
+        int main() { f (*a) [4] ; ...
+
+then the interpretation of  the  code  is  entirely  different.   The 
+fragment  in  question actually redeclares a local variable "a", such 
+that the type of "a" is "pointer to array of 4 int's"!  So we see  in 
+this   example  that  the  statement  "f(*a)[4];"  cannot  be  parsed 
+independent of context.
+
+The standard solution to the above ambiguity is to allow the  lexical 
+analyser  to  form  different tokens based on contextual information. 
+The contextual  information  that  is  used  is  the  answer  to  the 
+question:  "Is a given identifier defined as a typedef name (or class 
+name) at the current point in the  parse"?   I  will  refer  to  this 
+feedback  loop  (from  the parser that stores information in a symbol 
+table, wherein the lexer extracts the information) as the "lex hack".  
+With  this  lex  hack in place the code fragment "f(*a)[4];" would be 
+provided by the lexer as either:
+
+        IDENTIFIER '(' '*' IDENTIFIER ')' '[' INTEGERconstant ']' ';'
+
+or
+
+        TYPEDEFname '(' '*' IDENTIFIER ')' '[' INTEGERconstant ']' ';'
+
+The two case are very easy for a context free grammar to distinguish, 
+and  the  ambiguity vanishes.  Note that the fact that such a hack is 
+used (out of necessity) demonstrates that C is  not  a  context  free 
+language,  but the hack allows us to continue to use an LR(1) parser, 
+and a context free grammar.
+
+Note that this hack is, of necessity, also made use  of  in  the  C++ 
+grammar,  but no additional feedback (a.k.a.: hack) is required.  The 
+interested reader should also  note  that  this  feedback  loop  (re: 
+updating  the  symbol  table)  must be swift, as the lexical analyser 
+cannot proceed very far without this  contextual  information.   This 
+constraint  on  the  feedback  time  often  prevents  the parser from 
+"deferring" actions, and hence increases the pressure on  the  parser 
+to rapidly disambiguate token sequences.
+
+(Although  this  version  of  the C++ grammar does not support nested 
+types, the advanced reader is encouraged to consider their impact  on 
+the  above problem.  Specifically, code fragments such as "T::f" must 
+syntactically distinguish themselves as either typenames, or members.  
+Problems in this area can be expected to stress the above hack almost 
+to its breaking point.   The  resolution  to  this  problem  will  be 
+discussed in the next release of the grammar,... so stay tuned.).
+
+
+STATUS OF MY "DISAMBIGUATED" GRAMMAR
+
+My  grammar  is  now  fairly  complete.  Several independent reviews, 
+which provided a front end lexical analyser and parsed  existing  C++ 
+code,  have  verified  that  the  grammars  span  of the C++ language 
+appears complete.  I  have  not  incorporated  parametric  types  nor 
+exception  handling into the grammars at this point, as they continue 
+to be in a state of flux.
+
+The grammar does (I believe) support all the features provided in C++ 
+2.0,  including  multiple inheritance and the enhanced operator "new" 
+syntax (includes placement expression). I believe  that,  except  for 
+the  minor  change  involving  not  permitting parentheses around bit 
+field names during a declaration, my C++ grammar supports a  superset 
+of  my  ANSI  C  grammar. Note that I haven't inline expanded all the 
+rules in the C grammar that were required for C++ disambiguation (re: 
+deferring  reductions),  and  hence a `diff' of the two grammars will 
+not provide a trivial comparison.  The resulting major  advantage  of 
+this  grammar over every other current C++ parser (that I know of) is 
+that it supports old style function definitions AS WELL  AS  all  the 
+standard  C++.   (It  is  my  personal  belief  that such support was 
+dropped by many compilers and translators in  order  to  resolve  the 
+many  syntax problems that appear within C++.  I believe this grammar 
+shows that such a decision was premature).
+
+My list of shift-reduce and reduce-reduce conflicts is currently:  25 
+shift/reduce,  7  reduce/reduce conflicts reported.  I have chosen to 
+leave so many conflicts in the grammar because I hope to see  changes 
+to the syntax that will remove them, rather than making changes to my 
+grammar that will firmly accept and disambiguate  them.  (Considering 
+the  detailed  analysis  presented  here, such changes would only add 
+unnecessary complications to the grammar).
+
+8 SR caused by operator function name with trailing * or &
+8 SR caused by freestore              with trailing * or &
+1 SR caused by operator function name OR freestore, with trailing :
+1 SR caused by dangling else and my laziness
+
+1 SR and 1 RR caused by operator function name and trailing {
+
+3 SR caused by constructor declaration vs member declaration
+
+3 RR caused by function-like cast vs identifier declaration ambiguity
+3 RR caused by function-like cast vs typedef redeclaration ambiguity
+3 SR caused by redundant parened TYPEDEFname redeclaration vs old style cast
+
+
+Of these conflicts, the ones that most C++ parser authors are  mainly 
+concerned    with   are   the   last   9   conflicts,   relating   to 
+function-like-cast vs declaration, and redundant parened  TYPEDEFname 
+redeclaration  vs  old  style  cast.   The  following sections breeze 
+through the "easy" conflicts, and then talk at  length  about  the  9 
+tough ones.
+
+
+18 EASY CONFLICTS, WITH HAPPY ENDINGS
+
+The first group of 18 SR conflicts:
+
+8 SR caused by operator function name with trailing * or &
+8 SR caused by freestore              with trailing * or &
+1 SR caused by operator function name OR freestore, with trailing :
+1 SR caused by dangling else and my laziness
+
+have very simple resolutions.  If you are reading this, I assume that 
+you are already familiar with the if-if-else conflict.
+
+The trailing ':' has to do with the use of the  colon  in  a  ternary 
+"... ? ... : ..." expression.  The easiest example is:
+
+        void * p = boolean ? new struct S : ...
+
+The  problem  is  that this MIGHT be the first mention of "struct S", 
+and this MIGHT be where the elaboration of the structure is provided!  
+Under  such circumstances, what follows the ':' MIGHT be a base class 
+name, and the entire curly braced elaboration for S (ugh!).
+
+My resolution of this SR conflict is that "the longest possible  type 
+is constructed by the parser".  Hence the ':' is construed to be part 
+of the type "struct S".  This is in keeping with the subtle statement 
+on  in  section  7.1 of the C++ 2.0 Ref Man: "The longest sequence of 
+decl-specifier that could possibly be a type name  is  taken  as  the 
+decl-specifiers of a declaration".
+
+
+The  8 conflicts based "freestore with trailing * or &" can be hinted 
+at by the example:
+
+        a = new int * * object;
+
+Is the above the same as:
+
+        a = (new int) * (* T);
+or:
+        a = (new (int *)) * T;
+
+Again the "longest possible type" is isolated  by  my  grammar.   The 
+result is:
+
+        a = (new (int * * )) ...
+
+which  leads  to  a  syntax  error in my example!  This resolution is 
+indeed what is quietly specified for  C++  2.0  (and  implemented  in 
+cfront).   The  critical statement and example in the C++ 2.0 Ref Man 
+at the end of section 5.3.3 makes this resolution clear.
+
+The 8 conflicts involving "operator function names with trailing * or 
+&"  are  quite similar to what was just presented.  The critical fact 
+is that "operator typename" is allowed in the  grammar  to  define  a 
+function.   Whenever  a  function  is provided, but NOT followed by a 
+'(', the address of the function is implicitly taken and used in  the 
+expression  (see  draft ANSI C standard for finer details).  For some 
+class T, the following MIGHT all be valid statements:
+
+        operator T;
+        operator T*;
+        operator T**;
+
+If the above are valid, then the interpretation of the  following  is 
+ambiguous:
+
+        operator T * * a;
+
+The above might be interpreted as:
+
+        (operator T) * (* a);
+or
+        (operator (T *)) * a;
+
+The default LR rules parse the largest possible type, and lead to:
+
+        (operator (T * * )) ...
+
+which  in  our  example  leads  to  a  syntax  error.  Here again the 
+"longest possible type..." rule supports my grammar.  Note that  this 
+rule  is  actually  a  consequence  (in  my  opinion)  of  the cfront 
+implementation via a YACC grammar,  and  the  default  resolution  of 
+conflicts in that grammar.
+
+
+2 REDUCTION CONFLICTS WITH STRAIGHT FORWARD DISAMBIGUATION
+
+The two conflicts that were described as:
+
+   1 SR and 1 RR caused by operator function name and trailing {
+
+occur  when  there is an ambiguity as to whether the '{' is the start 
+of a function body in a  function  definition,  or  the  start  of  a 
+structure/class/enum  elaboration.  In part, this ambiguity is caused 
+by the fact that an  arbitrary  declarator  is  used  in  a  function 
+definition,  but  semantics require the declarator in a definition to 
+have  type  "function  returning  ...".   This  subtlety  causes  the 
+following  to  be  a  syntactically  valid  function definition, even 
+though it is semantically invalid:
+
+        void func { int a; } ...
+
+Semantic requirements on the declarator demand something more like:
+
+        void func() { int a; }  ...
+
+By using "operator struct S" in place of "func" in the first  example 
+we get:
+
+        void operator struct S { int a; } ...
+
+My  C++  grammar  attempts to assemble the longest possible type, and 
+hence parses this example as equivalent to:
+
+        void operator (struct S { int a;} ) ...
+
+Interestingly enough, this resolution not only supports the  "longest 
+possible type" rule, but also avoids the semantically invalid parse.
+
+
+3 NOVEL CONFLICTS THAT YIELD TO SEMANTIC DISAMBIGUATION
+
+The  conflicts  that are discussed in this section have been deferred 
+(by A LOT of work, and A LOT of inline expansion) to occur when a ';' 
+is  reached.   At  that point, semantic information in the tokens can 
+safely be used to decide which of two cases are at hand.
+
+The conflicts referred to as:
+
+    3 SR caused by constructor declaration vs member declaration
+
+occur during a  class/struct  elaboration.   Consider  the  following 
+class elaborations:
+
+        typedef int T1, T2, T3  ;
+        class GOO { int a;} ;
+        class FOO {
+                GOO    T1  ; // clearly a redefinition of T1
+                FOO  ( T2 ); // clearly a constructor
+                GOO  ( T3 ); // redefinition of T3
+                };
+
+Note  that  the  last two entries in FOO's elaboration "FOO(T2);" and 
+"GOO(T3);" are tokenized  IDENTICALLY,  but  must  have  dramatically 
+different  meanings.  When I first found this ambiguity I was hopeful 
+that I could extend the lex hack that distinguishes TYPEDEFnames from 
+random  IDENTIFIERs, and distinguish something like CURRENTCLASSname. 
+Unfortunately, the potential  for  elaborations  within  elaborations 
+appears  to  make such a hack unworkable.  In addition, once I got my 
+grammar to defer all such ambiguous cases until a  ';'  was  seen,  I 
+felt  confident that the ambiguity was resolved (and the introduction 
+of an additional "hack" was unnecessary).
+
+
+THE TOUGH AMBIGUITIES: FUNCTION LIKE CASTS AND COMPANY
+
+The ambiguities  listed  in  this  section  pertain  to  attempts  to 
+distinguish  declaration/types-names  from  expressions  names.   For 
+example:
+
+    char *b ="external" ; // declare a variable to confuse us :-)
+    main () {
+        class S;
+        S (*b)[5]; // redeclare "b" pointer to array of 5 S's ?
+               // OR ELSE indirect through b; cast to S; index using 5 ?
+        }
+
+The above is what I call  the  "declaration  vs  function  like  cast 
+ambiguity".   Awareness  about this ambiguity in this context appears 
+fairly widespread among C++ parser authors.   The  C++  2.0  Ref  Man 
+makes  explicit  reference  to this problem in section 6.8 "Ambiguity 
+Resolution".  I believe the underlying  philosophy  provided  by  the 
+Reference  Manual  is that if a token stream can be interpreted by an 
+ANSI C compiler to be a  declaration,  then  a  C++  compiler  should 
+disambiguate  in  favor of a declaration.  Unfortunately, section 6.8 
+goes on to say:
+
+    "To disambiguate, the whole statement may have to be examined  to 
+    determine  if  it  is  an expression-statement, or a declaration.  
+    ... The disambiguation is purely syntactic; that is, the  meaning 
+    of  the  names, beyond whether they are type-names or not, is not 
+    used in the disambiguation".
+
+The above  advice  only  forestalls  the  inevitable  ambiguity,  and 
+complicates  the  language  in the process.  The examples that follow 
+will demonstrate the difficulties.
+
+There are several other contexts where such ambiguities  (typedef  vs 
+expression) arise:
+
+        1) Where a statement is valid (as shown above).
+        2) As the argument to sizeof()
+        3) Following "new", with the C++ syntax allowing a placement
+                expression
+        4) Immediately following a left paren  in  an  expression  (it 
+                might be an old style cast, and hence a type name)
+        5)  Following  a  left paren, arguments to constructors can be 
+                confused with prototype type-names.
+        6) Recursively in any of the above,  following  a  left  paren 
+                (what  follows might be argument expressions, or might 
+                be function prototype parameter typing)
+
+Examples of simple versions of the sizeof context are:
+
+        class T;
+        sizeof ( T    ); // sizeof (type-name)
+        sizeof ( T[5] ); // again a type name
+        sizeof ( T(5) ); // sizeof (expression)
+        sizeof ( T()  ); // semantic error: sizeof "function returning T"?
+                        // OR ELSE sizeof result of function like cast
+
+Examples  of  the  old  style cast ambiguity context, which are still 
+ambiguous when the '(' after the 'T' has been seen:
+
+        class T { /* put required declarations here */ 
+                };
+        a = (T(      5));  // function like cast of 5
+        b = (T(      )) 0; // semantic error: cast of 0 to type "function
+                        // returning T"
+
+In constructors the following demonstrates the problems:
+
+        class T;
+        T (b)(int  d ); // same as "T b(int);", a function declaration
+        T (d)(int (5)); // same as "T d(5);", an identifier declaration
+        T (d)(int ( )); // ambiguous
+
+The problem can appear recursively in  the  following  examples.   By 
+"recursively"  I  mean that an ambiguity in the left-context has left 
+the parser unsure of whether an "expression" or  a  "type"  is  being 
+parsed,  and the ambiguity is continued by the token sequence.  After 
+the parser can determine what this subsequence is, it will in turn be 
+able to disambiguating what the prior tokens were.
+
+Recursion on the statement/declaration context:
+
+        class S;
+        class T;
+        S (*b)(T); // declare b "pointer to function taking T returning S"
+        S (*c)(T dummy); // same declaration as for "b"
+        int dummy;
+        S (*d)(T (dummy)); // This T might be casting dummy
+
+Recursion  on  the sizeof context is shown in the following examples. 
+As before, the examples include semantic errors.
+
+        class T;
+        class S;
+        sizeof ( T(S dummy) ); // sizeof "function taking S returning T"
+        int dummy;
+        sizeof ( T(S (dummy)) ); // sizeof "function taking S returning T"
+                // OR ELSE cast dummy to S, and then cast that to T, which
+                        // is the same as "sizeof T;"
+
+
+The following are the precise conflicts, along with typical contexts.  
+I  have derived the contexts by manually walking backwards through my 
+verbose  YACC  output.   Note  that  I  have  deleted  some  of   the 
+insignificant  rules  from  the  verbose  state  descriptions in this 
+section  (insignificant  in  that  they  are  not  involved  in   the 
+conflict).   To  see  the complete details of each conflict state see 
+the appendix at the end of this paper.
+
+
+WARNING: THE REMAINDER OF THIS SECTION IS  VERY  DETAILED  AND  TERSE 
+(PERHAPS  EVEN  CRYPTIC);  DO NOT TRY TO READ IT CAREFULLY UNLESS YOU 
+HAVE A LOT OF TIME TO KILL, AND A LOT OF  INTEREST  IN  THE  GRAMMAR.  
+(You  can skip to the next section, which is a bit less technical and 
+terse).
+
+---------------------------------------------------------------------
+        Minimal left context:   "main() { int ( identifier"
+                Is the identifier being declared?
+                Is the identifier a function name?
+                Is the identifier an array name?
+                   (The last two cases use function like casting into 
+                   type "int")
+
+        Left context can include an arbitrary number of '*', '&',  or 
+                '('  immediately  to the left of the identifier.  The 
+                basic.type.name    "int"    can    also    be     any 
+                simple.type.name (e.g., a TYPEDEFname)
+
+        My Default is to become a declarator, which then forms a 
+        declaration
+
+642: reduce/reduce conflict (red'ns 17 and 22 ) on (
+642: reduce/reduce conflict (red'ns 17 and 22 ) on )
+642: reduce/reduce conflict (red'ns 17 and 22 ) on [
+state 642
+        paren.identifier.declarator :  rescoped.identifier_    (17)
+        primary.expression :  rescoped.identifier_    (22)
+
+---------------------------------------------------------------------
+        Required left context:   "... ( TYPEDEFname ()",
+            where "..." includes a type.specifier.
+            It is assumed that "function returning TYPEDEFname"
+                is a valid "type.name".  Semantically this is
+                rarely legal, but the focus is on syntax here.
+
+            The above sequence could eventually parse into:
+            ... ( declarator             )
+            ... ( type.name              ) cast.expression
+            ... ( expression             )
+            ... ( parameter.decl.list    )
+            Note that parameter.decl.list is:
+                    type.name
+                    type.name = default.value , ...
+                    type.name , parameter.decl.list
+            Expanded examples are:
+                sizeof ( expression )
+                sizeof ( type.name  )
+                   where the argument to "sizeof" is one of the following:
+                int ( typename2 ( TYPEDEFname() )
+                int ( typename2 ( TYPEDEFname()  ,
+                int ( typename2 ( TYPEDEFname() = expression
+                int ( TYPEDEFname()
+            Is the TYPEDEFname a declaration specifier?
+            Is TYPEDEFname used as function like cast of 0 args?
+
+        Left  context can include an arbitrary number of '*', '&', or 
+                '(' immediately to the left  of  the "(TYPEDEFname".
+
+        Default is to become a type.qualifier.list, 
+            which becomes the trailing section of a  parameter.type.list,
+            which becomes a function.returning.modifier for a declarator,
+            which forces a redeclaration of TYPEDEFname,
+             (semantics may outlaw this redeclaration of TYPEDEFname
+                as a function WITHOUT use of "extern"!!!)
+
+740: reduce/reduce conflict (red'ns 74 and 64 ) on )
+740: reduce/reduce conflict (red'ns 74 and 64 ) on ,
+740: reduce/reduce conflict (red'ns 74 and 64 ) on =
+state 740
+        postfix.expression :  TYPEDEFname ( )_    (74)
+        parameter.type.list :  ( )_type.qualifier.list.opt
+        type.qualifier.list.opt : _    (64)
+
+---------------------------------------------------------------------
+        Minimal left context:   "main() { int ( ( TYPEDEFname"
+                Is the TYPEDEFname being redeclared?
+                Is TYPEDEFname in parenthesis the start as old style cast?
+
+        Left context can include an arbitrary number of '*', '&',  or 
+                '('  between the two '('s.  The basic.type.name "int" 
+                can also be any simple.type.name (e.g., a TYPEDEFname)
+
+        Default is to become a typedef.declarator,
+            which leads to the redeclaration of the TYPEDEFname
+
+782: shift/reduce conflict (shift 595, red'n 418) on )
+state 782
+        type.name :  TYPEDEFname_    (418)
+        simple.paren.typedef.declarator :  ( TYPEDEFname_)
+
+---------------------------------------------------------------------
+        Minimal left context:   "main() { int ( ( TYPEDEFname[2]"
+         OR
+        Minimal left context:   "main() { int ( ( TYPEDEFname(float)"
+                Is the TYPEDEFname being redeclared?
+                Is "array of TYPEDEFname" the type for
+                        an old style cast?  The result of the cast
+                        expression will undergo a function like cast into
+                        an int.
+
+        Left context can include an arbitrary number of '*', '&',  or 
+                '('  between the two '('s.  The basic.type.name "int" 
+                can also be any simple.type.name (e.g., a TYPEDEFname)
+
+        Default to form a typedef.declarator,
+                 which leads to a redeclaration of the  TYPEDEFname.
+                (Semantics preclude cast to this type anyway, so we have
+                actually syntactically disallowed a semantic error)
+
+874: shift/reduce conflict (shift 838, red'n 591) on )
+state 874
+        paren.postfix.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator_)
+        abstract.declarator :  postfixing.abstract.declarator_    (591)
+
+---------------------------------------------------------------------
+        Minimal left context:   "main() { int ( * ( TYPEDEFname"
+                Is the TYPEDEFname being redeclared?
+                Is TYPEDEFname in parenthesis the start as old style
+                    cast? The result of the cast will undergo and 
+                    indirection, and the result of that will be 
+                    cast to int by a function like cast!
+
+        Left context can include an arbitrary number of '*', '&',  or 
+                '('  to the left of the '*'.  The basic.type.name "int" 
+                can also be any simple.type.name (e.g., a TYPEDEFname)
+
+        Default to form a typedef.declarator,
+                which leads to a redeclaration of the  TYPEDEFname.
+
+875: shift/reduce conflict (shift 840, red'n 418) on )
+state 875
+        type.name :  TYPEDEFname_    (418)
+        paren.typedef.declarator :  indirect.or.reference ( TYPEDEFname_)
+
+---------------------------------------------------------------------
+
+
+SAMPLE RESOLUTIONS OF AMBIGUITIES BY MY C++ GRAMMAR
+
+
+Of the "hard examples" given in the C++ reference manual  (r6.8),  my 
+grammar  can  only "properly" detect a "statement-expression" for the 
+stream:
+
+        T(a,5)>>c;
+
+All the other examples default to  a  declarator  after  the  closing 
+parenthesis  following  the  identifier.   (See  my  comments  in the 
+conclusion section of this paper).
+
+I actually am not sure I agree with all the examples in the  C++  2.0 
+Reference Manual. Specifically, the example in section 6.8:
+
+        T (*d) (double(3));  // expression statement
+
+In  the  example  "T"  is  specified  to be a simple-type-name, which 
+includes all the basic  types  as  well  as  class-names,  and  more. 
+Considering the following are valid declarations:
+
+        void *a (0);
+        void *b (int(0));
+        void (*c)(int(0));
+
+I am unable to see the "syntactic" difference between this last token 
+stream and the  example  just  cited  in  the  reference  manual.  My 
+simplistic  parser  gives  me  the result that I at least expect.  It 
+concludes (prematurely, but seemingly correctly) that the stream is a 
+declaration (with a new style initializer).
+
+As  a  positive note, my grammar is able to parse the example given a 
+while back in comp.lang.c++, that Zortech 1.07 cannot parse:
+
+        a = (double(a)/double(b))...;
+
+Apparently,  upon  seeing  "(double"  some  parsers   commit   to   a 
+parenthesized  type-name for a cast expression, and cannot proceed to 
+parse a parenthesized expression.  No  mention  of  this  problem  is 
+listed in my conflict list, as resolution of this problem is simply a 
+matter of letting the LR parser wait long enough  before  committing.  
+Specifically, my grammar has not yet committed when all of:
+
+        a = (double(a)
+
+has  been  seen!   The  next  character  ('/')  allows the grammar to 
+unambiguously  conclude  that  the  sequence  "double(a)..."  is   an 
+expression.
+
+
+DIFFICULT AMBIGUITIES FOR A "C++ 2.0" COMPATIBLE PARSER TO TRY
+
+Having  seen  the  above contexts, I would be curious to see if other 
+C++ front ends with "smart lexers" (such as cfront)  can  handle  the 
+following.   These  examples  are  not  guaranteed  to  be  evaluated 
+correctly by my grammar, but I expect them to demonstrate  weaknesses 
+in  many other parsers.  The interpretation of these examples per C++ 
+2.0  definitions  requires  massive  lookahead.   In  addition,   the 
+examples  are  generally  unreadable by humans, and rarely parsed the 
+same way by any two implementations.
+
+    main()
+      {
+      class T 
+        { 
+        /* ... */
+        } a;
+      typedef T T1,T2,T3,T4,T5,T7,T8,T9,Ta,Tb,Tc,Td;
+        { /* start inner scope */
+        T((T1)         ); // declaration
+        T((T2)    a    ); // Statement expression
+        T((T3)(       )); // declaration of T3
+        T((T4)(T      )); // declaration of T4
+        T((T5)(T  a   )); // declaration of T5
+        T((T6)(T((a) ))); // declaration of T6
+        T((T7)(T((T) ))); // declaration of T7
+        T((T8)(T((T)b))); // statement expression
+
+        T(b[5]); // declaration
+        T(c());  // declaration
+        T(d()[5]);  // statement expression ? (function returning array 
+                      // is semantically illegal, but syntactically proper)
+        T(e[5]());  // statement expression ? (No array of functions)
+        T(f)[5]();  // statement expression ?  "                   "
+        
+        T(*Ta() )[5] [4];  //declaration
+        T(*Tb() [5]) [4];  //statement expression ? (function returning array)
+
+        T(*Tc()) [3 +2];  //declaration
+        T(*Td()) [3 ]+2;  //statement expression
+
+        }
+      }        
+
+
+COMMENTARY ON C++ 2.0 DISAMBIGUATING RULES
+
+There are two distinct thrusts in conflict disambiguation as provided 
+by  AT&T's efforts to define a standard for C++.  The first thrust is 
+"parse tokens into the longest possible declarator, and identify  the 
+syntax  errors  that  result".   The second thrust is to "use massive 
+external technology ("smart lexer", a.k.a.: "recursive decent  parser 
+that  helps  the  lexer",  a.k.a.  LALEX)  to look ahead, so that the 
+parser doesn't mis-parse a function-like-cast as  a  declaration  and 
+induce  a  syntax  error".   The  first  is a commitment to LR parser 
+technology, and an existing grammar (which could be cleaned up).  The 
+second  is a commitment to NOT use an LR parser, and to the use of an 
+existing implementation.
+
+It is my belief that LR parsers are well understood, and the addition 
+of  a  "smart  lexer" destroys all structure in a parser.  The result 
+can be anticipated to become a quagmire of code and hacks.  With this 
+firm  conviction,  I  have  provided  my  grammar in the hopes that a 
+standard can emerge that IS well defined, and is  implementable,  and 
+is readable by humans.
+
+
+
+SOURCE OF CONFLICTS IN C++ (MIXING TYPES AND EXPRESSIONS)
+
+One  fundamental strength in C is the similarity between declarations 
+and expressions.  The syntax of  the  two  is  intended  to  be  very 
+similar, and the result is a clean declaration and expression syntax. 
+(It takes some getting used to,  but  it  is  in  my  opinion  good).  
+Unfortunately,  there  are some slight distinctions between types and 
+expressions, which Ritchie et.  al.  apparently noticed.  It  is  for 
+this  reason  (I  am guessing) that the C cast operator REQUIRES that 
+the type be enclosed in parenthesis.  Moreover, there is also a clear 
+separator   in   a   declaration   between  the  declarator  and  the 
+initializing expression (the '=') (as some of you know, there is some 
+interesting  history  in  this area.).  The bottom line (as seen with 
+20-20 hindsight) is: "keep declarations  and  expressions  separate".  
+Each violation of this basic rule has induced conflicts.
+
+
+To  be  concrete about the differences between types and expressions, 
+the following two distinctions are apparent:
+
+    1) Abstract declarators are permitted.  No analogy is provided in 
+    expressions.    The   notable   distinction   is   that  abstract 
+    declarators include the possibility of trailing '*' tokens.
+        
+    2) The binding of elements in a  declaration  is  very  different 
+    from  any  expression.   Notably,  the declaration-specifiers are 
+    bound separately to each declarator in the comma  separated  list 
+    of  declarators  (example:  int  a, b, c;).  With (most forms of) 
+    expressions,  a  comma  provides  a   major   isolation   between 
+    expressions.
+
+C  also  used  reserved  names  to  GREATLY  reduce the complexity of 
+parsing.  The introduction of typedef names increased the  complexity 
+(it  made  the language context sensitive), but a simple hack between 
+lex and YACC overcame the problem.  An example is the statement:
+
+        name (*b)[4];
+
+Note that this  is  ambiguous,  EVEN  in  ANSI  C,  IF  there  is  no 
+distinction  between type-names and function names!  (i.e., "b" could 
+be getting redeclared to be of type "pointer to array  of  name",  OR 
+the function "name" could be called with argument "*b", the result of 
+which is indexed to the 4th element). In C, the two  kinds  of  names 
+(TYPEDEFnames  and  function  names  (a.k.a.:  declared identifiers)) 
+share a name space, and at every point in a source program the (hack) 
+contextual  distinction can be made by the tokenizer.  Hacks are neat 
+things in that the less you use them, the more  likely  they  are  to 
+work  when  you  REALLY need them (i.e., you don't have to fight with 
+existing hacks).  Having worked on designing  and  implementing  a  C 
+compiler,  I  was  pleasantly  amazed  at how the constructs all fell 
+together.
+
+The  major  violations  of  this  approach  (i.e.,  keep  declaration 
+separate from expressions) that come to mind with C++ are: 
+
+        function-like-casts,
+        freestore expressions without parens around the type,
+        conversion function names using arbitrary type specifiers,
+        parenthesized initializers that drive constructors.
+
+The  last  problem, parenthesized initializers, provides two areas of 
+conflicts.  The first is really an interference issue with old  style 
+C function definitions, which only bothers folks at file scope (GNU's 
+G++ compiler considered this to be too great an  obstacle,  and  they 
+don't  currently  support old style C definitions!).  The second part 
+of this conflict  involves  a  more  subtle  separation  between  the 
+declarator,  and  the  initializer. (K&R eventually provided an equal 
+sign as an unequivocal separator, but parens used in C++ are  already 
+TOO  overloaded to separate anything).  The significance of this lack 
+of a clear separator is that it  is  difficult  to  decide  that  the 
+"declarator"  is complete, and that the declared name should be added 
+to the scope.  The last problem does interact in a nasty way with the 
+function-like  cast  vs  declaration conflicts (the problem slows the 
+feedback loop to the symbol table, which  is  critical  to  continued 
+lexing).  The parened initializers also provide another context where 
+it is difficult to distinguish between expressions (a  true  argument 
+list for the constructor) and a declaration continuation (a parameter 
+type list).  
+
+The second problem listed falls out of the "new-expression"  with  an 
+unparenthesized type.  This form of freestore (such as "new int * *") 
+allows types to be placed adjacent to expressions, and  the  trailing 
+'*'  ambiguity  rears  its head.  I can easily prove that this is the 
+culprit in terms of specific  ambiguities,  in  that  removing  these 
+(unnecessary?) forms significantly disambiguates the grammar.  (It is 
+rather nice to use YACC  as  a  tool  to  prove  that  a  grammar  is 
+unambiguous!).  It is interesting to note that if only the derivation 
+of a freestore expression were limited  to  (using  the  non-terminal 
+names of the form that the C++ Reference manual uses):
+
+        new placement-opt ( type-name )  parened-arg-list-opt
+
+then  all  the  LR(1)  reduce  conflicts  based on this problem would 
+vanish.  Indeed, the culprit can clearly be shown to be:
+
+        new placement-opt  restricted-type-name parened-arg-list-opt
+
+The characters which excite these reduction conflicts are  '*',  '&', 
+and ':'.  The context in which the ':' is significant occurs when the 
+freestore expression is the middle expression of the ternary operator 
+set  "?:".   In this ternary operator context, the use of a type name 
+such as "class a" leaves the LR(1) parser confused about the  meaning 
+of a ':' that follows.
+
+The     third    problem    that    I    indicated    involves    the 
+conversion-function-name.  Here again, if the syntax were  restricted 
+to ONLY:
+
+        operator simple-type-name
+
+then  the  LR(1)  conflicts  would vanish.  It is interesting to note 
+that the keyword "operator" serves as the  left  separator,  and  the 
+restriction  to  "simple-type-name"  results  in  an  implicit  right 
+separator  (simple-type-names  are  exactly  one  token  long).   The 
+conflicts  appear  when multiple tokens are allowed for a declaration 
+specifier, and an optional pointer-modifier list may be  added  as  a 
+postfix.   The  conflicts  that  result  from this lack of separation 
+include  all  those  provided  by  the  freestore  example,  and   an 
+additional   set   as   well.    The  additional  conflicts  are  not 
+semantically significant, but  they  are  noticeable  to  a  compiler 
+writer.  The interesting new trailing character conflict is '{'.  The 
+context for this conflict involves the  definition  of  a  conversion 
+function,  which  always  includes  a  function  body (with a leading 
+character of '{' ).  A simple grammar does not SYNTACTICALLY  require 
+that      "function      returning      modifier"      follow     the 
+conversion-function-name in  all  declarations/definitions,  although 
+semantics  do  require such.  Hence an LR(1) conflict occurs when the 
+type-name is of  the  form  "struct  A",  and  a  possible  structure 
+elaboration may follow (with leading character '{' ).
+
+Here  again (as with the unambiguous version of freestore) the syntax 
+could be extended to:
+
+operator.function.name :
+        OPERATOR any.operator
+        | OPERATOR basic.type.name
+        | OPERATOR TYPEDEFname
+        | OPERATOR type.qualifier
+        | OPERATOR '(' type.name ')'
+        ;
+
+instead of:
+
+operator.function.name :
+        OPERATOR any.operator
+        | OPERATOR type.specifier.or.name  operator.function.ptr.opt
+        | OPERATOR type.qualifier.list     operator.function.ptr.opt
+        ;
+
+and the ambiguities would vanish (and the expressivity would  not  be 
+diminished).
+
+
+FUNCTION LIKE CAST VS DECLARATION AMBIGUITIES
+
+The real big culprit (i.e., my anti-favorite) in this whole ambiguity 
+set  (re:  keeping   types   and   expressions   separate)   is   the 
+function-like-cast.   The  reason  why it is so significant (to an LR 
+parser)  is  that  the  binding  of  a  type-name,  when  used  in  a 
+function-like-cast,   is  directly  to  the  following  parenthesized 
+argument list.  In contrast, the binding of a type-name when used  in 
+a  declaration  is  to  all  the  "stuff"  that  follows,  up until a 
+declarator termination mark like a ',', ';' or '='. Life really  gets 
+tough  for LR folks when the parse tree MUST be reduced, but you just 
+can't tell how yet.  With this problem, the  hacks  began  to  appear 
+(re:  the  "smart  lexer").  Note that these new style casts are much 
+more than a notational convenience  in  C++.  The  necessity  of  the 
+function like cast lies in the fact that such a cast can take several 
+arguments, whereas the old style cast is ALWAYS a unary operator.
+
+I was (past tense) actually working towards  resolving  this  problem 
+via some standard methods that I have developed (re: inline expansion 
+of rules to provide deferred reduction).  I  was  (past  tense)  also 
+using one more sneaky piece of work to defer the reductions, as I was 
+carefully making use of right recursion (instead of the standard left 
+recursion)  in  order  to  give  the parser a chance to build up more 
+context.   I  can  demonstrate  the  usefulness  of  right  recursive 
+grammars  in disambiguating difficult toy grammars.  Unfortunately, I 
+realized at some point that I NEEDED to perform certain actions (such 
+as  add  identifiers  to  the  symbol table) in order to complete the 
+parse!?!  This was my catch 22.  I could POSSIBLY parse using an LALR 
+grammar,  if I could only defer actions until I had enough context to 
+disambiguate.  Unfortunately, I HAD to perform certain  actions  (re: 
+modify  the  symbol table, which changed the action of the tokenizer) 
+BEFORE I could continue to examine tokens!  In some  terrible  sense, 
+the typedef hack had come back to haunt me.
+
+I backed off a bit in my grammar after reaching this wall, and now my 
+grammar only waits until it reaches the identifier in  the  would  be 
+declarator.   I  really  didn't  want  to  parse  the stuff after the 
+identifier name (sour grapes?), because  I  knew  I  would  not  (for 
+example)  be  able  to  identify  a "constant expression" in an array 
+subscript (most of the time, if it isn't constant, then it can't be a 
+declaration).   I  don't  believe that a compiler should compete in a 
+battle of wits with  the  programmer,  and  the  parser  was  already 
+beginning  to outwit me (i.e., I was having a hard time parsing stuff 
+mentally that is provided as examples in the 2.0 Reference Manual).   
+
+
+FUNCTION LIKE CAST vs DECLARATION : THE TOUGH EXAMPLE:        
+        
+The following is about the nastiest example that I have been able  to 
+construct  for this ambiguity group.  I am presenting it here just in 
+case someone is left with a thought that there is "an easy way out".
+
+The  fact  that  identifiers  can  remain  ambiguous  SO  LONG  after 
+encountering  them  can  cause  no end of trouble to the parser.  The 
+following example does not succumb to static (re: no  change  to  the 
+symbol  table)  anticipatory  lexing  of  a  statement.   As such, it 
+demonstrates the futility of attempting to use  a  "smart  lexer"  to 
+support  the  philosophy: "If it can be interpreted as a declaration, 
+then so be it;  otherwise  it  is  an  expression".   This  ambiguous 
+example  exploits  the  fact  that  declarators  MUST be added to the 
+symbol table as soon as  they  are  complete  (and  hence  they  mask 
+external declarations).
+
+First I will present the example without comments:
+
+class Type1 {
+            Type1 operator()(int);
+            } ;
+class wasType2 { ...}; 
+int (*c2)(Type1 dummy);
+
+main ()
+    {
+    const int    a1  = 0, new_var  (4), (*c1)(int     (a1));
+    Type1       (a2) = 3, wasType2 (4), (*c2)(wasType2(a1));
+    }
+
+
+
+
+Now to repeat the example with comments:
+
+class Type1 {....
+            Type1 operator()(int);
+            } ;
+class wasType2 { ....}; /* we will almost redeclare this typename!?! */
+int (*c2)(Type1 dummy); /* we will NOT redeclare Type1 */
+
+main ()
+    {
+    /* The first line is indeed simple.  It is simply placed here
+    to hint at how the second line MIGHT analogously be parsed. */
+    
+    const int    a1  = 0, new_var  (4), (*c1)(int     (a1));
+
+    /*  As  a review, "a1" is declared to be a constant with value 0. 
+        "new_var" is declared to be another constant, but with  value 
+        4.  Finally,  "c1"  is  declared  to  be a pointer to a const 
+        integer, and the initial value of this pointer is  "int(a1)", 
+        which  is  the  same  as "int(0)", or simply "0" (a.k.a., the 
+        null pointer). It is significant that "a1" entered the symbol 
+        table  quickly  so  that  it  could  be  used  later  in  the 
+        declaration. */
+
+    /* Static lexing of what follows will suggest that the  following 
+    is  also  a  declaration.   This  statement  is  actually 3 comma 
+    separated expressions!! The explanation that follows  shows  that 
+    assuming   the   2nd  statement  is  a  declaration  leads  to  a 
+    contradiction. */
+    
+    Type1      (a2) = 3, wasType2 (4), (*c2)(wasType2(a1));
+    
+    /* Assume this second statement is a declaration.  Note  that  by 
+    the  time  "c2" is parsed, "wasType2" has been redeclared to be a 
+    variable of type "Type1".  Hence  "wasType2(a1)"  is  actually  a 
+    function  call  to  "wasType2.operator()(a1)",  and  it  is not a 
+    function    prototype    arg    list.     It     follows     that 
+    "(*c2)(wasType2(a1))"  is  an  expression,  and NOT a declarator!  
+    Since this last entry is not a declarator, the  entire  statement 
+    must  be an expression (ugh! it is time to backtrack). After much 
+    work on my part, I think it might even be  a  semantically  valid 
+    expression.   Once this backtracking is complete, we see that the 
+    first expression "Type1 (a2) = 3" is  an  assignment  to  a  cast 
+    expression.  The second expression "wasType2 (4)", is a cast of a 
+    constant.  The  third  expression  "(*c2)(wasType2(a1))",  is  an 
+    indirect  function  call.  The argument of the call is the result 
+    of a cast.  Note that "wasType2" is  actually  never  redeclared, 
+    but it was close! */
+    
+    /*  For  those of you who can parse this stuff in your sleep, and 
+    noticed the slight error  in  the  above  argument,  I  have  the 
+    following "fix".  The error is that the 
+
+        "(*c2)(wasType2(a1))" 
+
+    could actually be a declaration with a parenthesized initializer.  
+    I could have change this token subsequence to:
+
+        "(*(*c2)(wasType2(a1)))(int(a1))"
+
+    and avoid the constructor ambiguity, but it would only complicate 
+    the  discussion.   Note that in this form, if "wasType2" is not a 
+    type, the the quoted text cannot be a declaration.*/
+
+    /* Two parens are all a user would need to  add  to  the  cryptic 
+    example  to  unambiguously  specify  that  this  statement  is an 
+    expression.  Specifically: */
+    
+       (Type1) (a2) = 3, wasType2 (4), (*c2)(wasType2(a1));
+    /* or ...*/
+       (Type1 (a2) = 3), wasType2 (4), (*c2)(wasType2(a1));
+
+    /* I would vote for a syntax error in such ambiguous stream, with 
+    an  early  decision that it was a declaration.  After seeing this 
+    example, I doubt that I could quickly assert that I could produce 
+    a non-backtracking parser that disambiguates statements according 
+    to the C++ 2.0 rule.  I am sure  I  can  forget  about  a  simple 
+    lex-YACC combination doing it. */
+
+    }
+
+
+Most  simply  put,  if  a  "smart  lexer"  understands these: a) I am 
+impressed, b) Why use a parser when a lexer can parse so well?
+
+The bottom line is that disambiguation of declarations via "If it can 
+be  a  declaration,  then it is one", seems to require a backtracking 
+parser. (Or some very fancy parsing approach).  I am not even sure if 
+the above examples are as bad as it can get!
+
+
+CONCLUSION
+
+I  believe that the C++ grammar that I have made available represents 
+a viable machine readable standard for the syntax description of  the 
+C++  language.   In  cases where the ambiguities are still exposed by 
+conflicts (as noted by YACC), to further defer  resolution  would  be 
+detrimental  to  a  user.   I see no benefit in describing a computer 
+language that must support human writers, but cannot be understood by 
+humans.    Any   code  that  exploits  such  deferral  is  inherently 
+non-portable, and deserves to be diagnosed as an  error  (my  grammar 
+asserts  a  "syntax  error").   Rather than dragging the C++ language 
+into support for a ad-hoc parser implementations such as cfront  (and 
+the "smart lexer"), I would heavily suggest the use of my grammar.  I 
+do not believe that my grammar would "break" much existing code,  but 
+in cases where it would, the code would not be portable anyway (other 
+than to a port of an IDENTICAL parser).
+
+I hope to see a great deal of use of my grammars, and I believe  that 
+standardizing  on  the represented syntax will unify the C++ language 
+greatly.
+
+        Jim Roskind
+        Independent Consultant
+        516 Latania Palm Drive
+        Indialantic FL 32903
+        (407)729-4348
+        ...uunet!leafusa!jar
+
+
+APPENDIX A:
+  PROPOSED GRAMMAR MODIFICATIONS (fixing '*', '&' and ':' conflicts)
+
+Based on the other  items  described  above,  I  have  the  following 
+suggestions  for  cleaning up the grammar definition.  Unfortunately, 
+it provides subtle variations from the "C++ 2.0" standard.
+
+
+Current Grammar:
+
+operator.function.name :
+        OPERATOR any.operator
+        | OPERATOR type.specifier.or.name  operator.function.ptr.opt
+        | OPERATOR type.qualifier.list     operator.function.ptr.opt
+        ;
+
+
+operator.new.type:
+        type.qualifier.list      operator.new.declarator.opt
+                        operator.new.initializer.opt
+        | type.specifier.or.name operator.new.declarator.opt
+                        operator.new.initializer.opt
+        ;
+
+Proposed new grammar (which requires parens around complex types):
+
+operator.function.name :
+        OPERATOR any.operator
+        | OPERATOR basic.type.name
+        | OPERATOR TYPEDEFname
+        | OPERATOR type.qualifier
+        | OPERATOR '(' type.name ')'
+        ;
+
+operator.new.type:
+        basic.type.name    operator.new.initializer.opt 
+        | TYPEDEFname      operator.new.initializer.opt 
+        | type.qualifier   operator.new.initializer.opt 
+        | '(' type.name ') operator.new.initializer.opt 
+        ;
+
+The impact of the above changes is that all complex type names (i.e.: 
+names that are not simply a typedef/class name, or a basic type names 
+like char) must be enclosed in parenthesis  in  both  `new  ...'  and 
+`operator  ...' expressions. Both of the above changes would clear up 
+a number of ambiguities.  In some sense, the current "disambiguation" 
+(of  trailing  '*', '&', and ':') is really a statement that whatever 
+an LR(1) parser cannot disambiguate is a syntax error.  In  contrast, 
+the above rules define an unambiguous grammar.
+
+
+APPENDIX B:
+  AMBIGUITIES IN MY C++ GRAMMAR AS LISTED BY YACC VERBOSE OPTION
+
+The  following  are  the  list of conflicts that were reported in the 
+verbose output from an AT&T compatible YACC.  I have only listed  the 
+conflict states here, as the entire file is well in excess of 500K.
+
+
+182: shift/reduce conflict (shift 183, red'n 286) on :
+182: reduce/reduce conflict (red'ns 286 and 280 ) on {
+state 182
+        aggregate.name :  aggregate.key identifier.or.typedef.name_derivation.opt $$284 { member.declaration.list.opt }
+        aggregate.name :  aggregate.key identifier.or.typedef.name_    (286)
+        derivation.opt : _    (280)
+
+        :  shift 183
+        {  reduce 280
+        .  reduce 286
+
+        derivation.opt  goto 415
+
+
+187: shift/reduce conflict (shift 427, red'n 369) on {
+state 187
+        enum.name :  ENUM identifier.or.typedef.name_{ enumerator.list }
+        enum.name :  ENUM identifier.or.typedef.name_    (369)
+
+        {  shift 427
+        .  reduce 369
+
+
+189: shift/reduce conflict (shift 50, red'n 29) on *
+189: shift/reduce conflict (shift 51, red'n 29) on &
+state 189
+        operator.function.name :  OPERATOR type.specifier.or.name_operator.function.ptr.opt
+        operator.function.ptr.opt : _    (29)
+
+        TYPEDEFname  shift 431
+        *  shift 50
+        &  shift 51
+        .  reduce 29
+
+        operator.function.ptr.opt  goto 428
+        pointer.operator  goto 429
+        indirect.or.reference  goto 430
+
+
+190: shift/reduce conflict (shift 50, red'n 29) on *
+190: shift/reduce conflict (shift 51, red'n 29) on &
+state 190
+        operator.function.name :  OPERATOR type.qualifier.list_operator.function.ptr.opt
+        type.qualifier.list :  type.qualifier.list_type.qualifier
+        basic.type.specifier :  type.qualifier.list_basic.type.name
+        sue.type.specifier :  type.qualifier.list_elaborated.type.name
+        typedef.type.specifier :  type.qualifier.list_TYPEDEFname
+        operator.function.ptr.opt : _    (29)
+
+        DOUBLE  shift 42
+        INT  shift 39
+        STRUCT  shift 68
+        LONG  shift 40
+        ENUM  shift 66
+        CHAR  shift 37
+        UNION  shift 69
+        CONST  shift 63
+        FLOAT  shift 41
+        SHORT  shift 38
+        UNSIGNED  shift 44
+        SIGNED  shift 43
+        VOID  shift 36
+        VOLATILE  shift 64
+        CLASS  shift 70
+        TYPEDEFname  shift 433
+        *  shift 50
+        &  shift 51
+        .  reduce 29
+
+        operator.function.ptr.opt  goto 432
+        pointer.operator  goto 429
+        indirect.or.reference  goto 430
+        basic.type.name  goto 151
+        type.qualifier  goto 150
+        elaborated.type.name  goto 152
+        aggregate.name  goto 48
+        enum.name  goto 49
+        aggregate.key  goto 65
+
+
+429: shift/reduce conflict (shift 50, red'n 29) on *
+429: shift/reduce conflict (shift 51, red'n 29) on &
+state 429
+        operator.function.ptr.opt :  pointer.operator_operator.function.ptr.opt
+        operator.function.ptr.opt : _    (29)
+
+        TYPEDEFname  shift 431
+        *  shift 50
+        &  shift 51
+        .  reduce 29
+
+        operator.function.ptr.opt  goto 636
+        pointer.operator  goto 429
+        indirect.or.reference  goto 430
+
+
+430: shift/reduce conflict (shift 50, red'n 29) on *
+430: shift/reduce conflict (shift 51, red'n 29) on &
+state 430
+        operator.function.ptr.opt :  indirect.or.reference_operator.function.ptr.opt
+        pointer.operator :  indirect.or.reference_type.qualifier.list
+        operator.function.ptr.opt : _    (29)
+
+        CONST  shift 63
+        VOLATILE  shift 64
+        TYPEDEFname  shift 431
+        *  shift 50
+        &  shift 51
+        .  reduce 29
+
+        operator.function.ptr.opt  goto 637
+        type.qualifier.list  goto 166
+        pointer.operator  goto 429
+        indirect.or.reference  goto 430
+        type.qualifier  goto 46
+
+
+484: shift/reduce conflict (shift 50, red'n 103) on *
+484: shift/reduce conflict (shift 51, red'n 103) on &
+state 484
+        operator.new.type :  type.qualifier.list_operator.new.declarator.opt operator.new.initializer.opt
+        type.qualifier.list :  type.qualifier.list_type.qualifier
+        basic.type.specifier :  type.qualifier.list_basic.type.name
+        sue.type.specifier :  type.qualifier.list_elaborated.type.name
+        typedef.type.specifier :  type.qualifier.list_TYPEDEFname
+        operator.new.declarator.opt : _    (103)
+
+        DOUBLE  shift 42
+        INT  shift 39
+        STRUCT  shift 68
+        LONG  shift 40
+        ENUM  shift 66
+        CHAR  shift 37
+        UNION  shift 69
+        CONST  shift 63
+        FLOAT  shift 41
+        SHORT  shift 38
+        UNSIGNED  shift 44
+        SIGNED  shift 43
+        VOID  shift 36
+        VOLATILE  shift 64
+        CLASS  shift 70
+        TYPEDEFname  shift 433
+        *  shift 50
+        &  shift 51
+        [  shift 678
+        .  reduce 103
+
+        pointer.operator  goto 677
+        indirect.or.reference  goto 676
+        basic.type.name  goto 151
+        operator.new.declarator.opt  goto 674
+        operator.new.array.declarator  goto 675
+        type.qualifier  goto 150
+        elaborated.type.name  goto 152
+        aggregate.name  goto 48
+        enum.name  goto 49
+        aggregate.key  goto 65
+
+
+485: shift/reduce conflict (shift 50, red'n 103) on *
+485: shift/reduce conflict (shift 51, red'n 103) on &
+state 485
+        operator.new.type :  type.specifier.or.name_operator.new.declarator.opt operator.new.initializer.opt
+        operator.new.declarator.opt : _    (103)
+
+        TYPEDEFname  shift 431
+        *  shift 50
+        &  shift 51
+        [  shift 678
+        .  reduce 103
+
+        pointer.operator  goto 677
+        indirect.or.reference  goto 676
+        operator.new.declarator.opt  goto 679
+        operator.new.array.declarator  goto 675
+
+
+642: reduce/reduce conflict (red'ns 17 and 22 ) on (
+642: reduce/reduce conflict (red'ns 17 and 22 ) on )
+642: reduce/reduce conflict (red'ns 17 and 22 ) on [
+state 642
+        paren.identifier.declarator :  rescoped.identifier_    (17)
+        primary.expression :  rescoped.identifier_    (22)
+
+        (  reduce 17
+        )  reduce 17
+        [  reduce 17
+        .  reduce 22
+
+
+676: shift/reduce conflict (shift 50, red'n 103) on *
+676: shift/reduce conflict (shift 51, red'n 103) on &
+state 676
+        operator.new.declarator.opt :  indirect.or.reference_operator.new.declarator.opt
+        pointer.operator :  indirect.or.reference_type.qualifier.list
+        operator.new.declarator.opt : _    (103)
+
+        CONST  shift 63
+        VOLATILE  shift 64
+        TYPEDEFname  shift 431
+        *  shift 50
+        &  shift 51
+        [  shift 678
+        .  reduce 103
+
+        type.qualifier.list  goto 166
+        pointer.operator  goto 677
+        indirect.or.reference  goto 676
+        operator.new.declarator.opt  goto 802
+        operator.new.array.declarator  goto 675
+        type.qualifier  goto 46
+
+
+677: shift/reduce conflict (shift 50, red'n 103) on *
+677: shift/reduce conflict (shift 51, red'n 103) on &
+state 677
+        operator.new.declarator.opt :  pointer.operator_operator.new.declarator.opt
+        operator.new.declarator.opt : _    (103)
+
+        TYPEDEFname  shift 431
+        *  shift 50
+        &  shift 51
+        [  shift 678
+        .  reduce 103
+
+        pointer.operator  goto 677
+        indirect.or.reference  goto 676
+        operator.new.declarator.opt  goto 803
+        operator.new.array.declarator  goto 675
+
+
+740: reduce/reduce conflict (red'ns 74 and 64 ) on )
+740: reduce/reduce conflict (red'ns 74 and 64 ) on ,
+740: reduce/reduce conflict (red'ns 74 and 64 ) on =
+state 740
+        postfix.expression :  TYPEDEFname ( )_    (74)
+        parameter.type.list :  ( )_type.qualifier.list.opt
+        type.qualifier.list.opt : _    (64)
+
+        )  reduce 64
+        ,  reduce 64
+        CONST  shift 63
+        VOLATILE  shift 64
+        ELLIPSIS  reduce 64
+        =  reduce 64
+        .  reduce 74
+
+        type.qualifier.list  goto 533
+        type.qualifier.list.opt  goto 532
+        type.qualifier  goto 46
+
+
+782: shift/reduce conflict (shift 595, red'n 418) on )
+state 782
+        class.rescoped.identifier :  TYPEDEFname_CLCL identifier.or.typedef.name
+        class.rescoped.identifier :  TYPEDEFname_CLCL operator.function.name
+        class.rescoped.identifier :  TYPEDEFname_CLCL ~ TYPEDEFname
+        class.rescoped.identifier :  TYPEDEFname_CLCL class.rescoped.identifier
+        postfix.expression :  TYPEDEFname_( )
+        postfix.expression :  TYPEDEFname_( argument.expression.list )
+        typedef.type.specifier :  TYPEDEFname_type.qualifier
+        type.name :  TYPEDEFname_    (418)
+        type.name :  TYPEDEFname_abstract.declarator
+        paren.postfix.typedef.declarator :  ( TYPEDEFname_postfixing.abstract.declarator )
+        simple.paren.typedef.declarator :  ( TYPEDEFname_)
+        pointer.operator :  TYPEDEFname_CLCL * type.qualifier.list.opt
+
+        (  shift 687
+        )  shift 595
+        CONST  shift 63
+        VOLATILE  shift 64
+        TYPEDEFname  shift 431
+        CLCL  shift 129
+        *  shift 50
+        &  shift 51
+        [  shift 98
+        .  error
+
+        pointer.operator  goto 684
+        indirect.or.reference  goto 683
+        postfixing.abstract.declarator  goto 874
+        type.qualifier  goto 133
+        parameter.type.list  goto 97
+        abstract.declarator  goto 561
+        unary.abstract.declarator  goto 548
+        postfix.abstract.declarator  goto 549
+        array.abstract.declarator  goto 96
+
+
+874: shift/reduce conflict (shift 838, red'n 591) on )
+state 874
+        paren.postfix.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator_)
+        abstract.declarator :  postfixing.abstract.declarator_    (591)
+
+        )  shift 838
+        .  error
+
+
+875: shift/reduce conflict (shift 840, red'n 418) on )
+state 875
+        class.rescoped.identifier :  TYPEDEFname_CLCL identifier.or.typedef.name
+        class.rescoped.identifier :  TYPEDEFname_CLCL operator.function.name
+        class.rescoped.identifier :  TYPEDEFname_CLCL ~ TYPEDEFname
+        class.rescoped.identifier :  TYPEDEFname_CLCL class.rescoped.identifier
+        postfix.expression :  TYPEDEFname_( )
+        postfix.expression :  TYPEDEFname_( argument.expression.list )
+        typedef.type.specifier :  TYPEDEFname_type.qualifier
+        type.name :  TYPEDEFname_    (418)
+        type.name :  TYPEDEFname_abstract.declarator
+        paren.typedef.declarator :  indirect.or.reference ( TYPEDEFname_)
+        paren.postfix.typedef.declarator :  ( TYPEDEFname_postfixing.abstract.declarator )
+        pointer.operator :  TYPEDEFname_CLCL * type.qualifier.list.opt
+
+        (  shift 687
+        )  shift 840
+        CONST  shift 63
+        VOLATILE  shift 64
+        TYPEDEFname  shift 431
+        CLCL  shift 129
+        *  shift 50
+        &  shift 51
+        [  shift 98
+        .  error
+
+        pointer.operator  goto 684
+        indirect.or.reference  goto 683
+        postfixing.abstract.declarator  goto 874
+        type.qualifier  goto 133
+        parameter.type.list  goto 97
+        abstract.declarator  goto 561
+        unary.abstract.declarator  goto 548
+        postfix.abstract.declarator  goto 549
+        array.abstract.declarator  goto 96
+
+
+876: shift/reduce conflict (shift 950, red'n 451) on ELSE
+state 876
+        selection.statement :  IF ( expression ) statement_    (451)
+        selection.statement :  IF ( expression ) statement_ELSE statement
+
+        ELSE  shift 950
+        .  reduce 451
+
+
+1026: shift/reduce conflict (shift 1066, red'n 571) on ;
+state 1026
+        constructor.conflicting.parameter.list.and.body :  ( TYPEDEFname )_;
+        constructor.conflicting.parameter.list.and.body :  ( TYPEDEFname )_type.qualifier.list ;
+        constructor.conflicting.parameter.list.and.body :  ( TYPEDEFname )_constructor.init.list.opt compound.statement
+        constructor.conflicting.parameter.list.and.body :  ( TYPEDEFname )_type.qualifier.list constructor.init.list.opt compound.statement
+        simple.paren.typedef.declarator :  ( TYPEDEFname )_    (571)
+        constructor.init.list.opt : _    (539)
+
+        CONST  shift 63
+        VOLATILE  shift 64
+        :  shift 81
+        ;  shift 1066
+        {  reduce 539
+        .  reduce 571
+
+        type.qualifier.list  goto 1067
+        type.qualifier  goto 46
+        constructor.init.list  goto 1069
+        constructor.init.list.opt  goto 1068
+
+
+1065: shift/reduce conflict (shift 1102, red'n 359) on ;
+state 1065
+        member.conflict.paren.postfix.declaring.item :  TYPEDEFname ( TYPEDEFname postfixing.abstract.declarator )_member.pure.opt
+        constructor.conflicting.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator )_type.qualifier.list ;
+        constructor.conflicting.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator )_type.qualifier.list constructor.init.list.opt compound.statement
+        constructor.conflicting.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator )_;
+        constructor.conflicting.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator )_constructor.init.list.opt compound.statement
+        member.pure.opt : _    (359)
+        constructor.init.list.opt : _    (539)
+
+        CONST  shift 63
+        VOLATILE  shift 64
+        :  shift 81
+        =  shift 971
+        ;  shift 1102
+        {  reduce 539
+        .  reduce 359
+
+        type.qualifier.list  goto 1101
+        type.qualifier  goto 46
+        member.pure.opt  goto 1100
+        constructor.init.list  goto 1069
+        constructor.init.list.opt  goto 1103
+
+
+1089: shift/reduce conflict (shift 1102, red'n 359) on ;
+state 1089
+        member.conflict.paren.postfix.declaring.item :  declaration.specifier ( TYPEDEFname postfixing.abstract.declarator )_member.pure.opt
+        constructor.conflicting.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator )_type.qualifier.list ;
+        constructor.conflicting.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator )_type.qualifier.list constructor.init.list.opt compound.statement
+        constructor.conflicting.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator )_;
+        constructor.conflicting.typedef.declarator :  ( TYPEDEFname postfixing.abstract.declarator )_constructor.init.list.opt compound.statement
+        member.pure.opt : _    (359)
+        constructor.init.list.opt : _    (539)
+
+        CONST  shift 63
+        VOLATILE  shift 64
+        :  shift 81
+        =  shift 971
+        ;  shift 1102
+        {  reduce 539
+        .  reduce 359
+
+        type.qualifier.list  goto 1101
+        type.qualifier  goto 46
+        member.pure.opt  goto 1128
+        constructor.init.list  goto 1069
+        constructor.init.list.opt  goto 1103
+
+
+123/127 terminals, 160/200 nonterminals
+609/650 grammar rules, 1157/1200 states
+25 shift/reduce, 7 reduce/reduce conflicts reported
+243/350 working sets used
+memory: states,etc. 13727/60000, parser 10871/12000
+495/600 distinct lookahead sets
+756 extra closures
+7300 shift entries, 25 exceptions
+1797 goto entries
+4731 entries saved by goto default
+Optimizer space used: input 18036/60000, output 8092/12000
+8092 table entries, 3568 zero
+maximum spread: 351, maximum offset: 1148
